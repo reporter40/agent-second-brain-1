@@ -1,6 +1,5 @@
-"""Handler for /do command - arbitrary Claude requests."""
+"""Handler for /do command - arbitrary LLM requests."""
 
-import asyncio
 import logging
 
 from aiogram import Bot, Router
@@ -39,7 +38,7 @@ async def cmd_do(message: Message, command: CommandObject, state: FSMContext) ->
 @router.message(DoCommandState.waiting_for_input)
 async def handle_do_input(message: Message, bot: Bot, state: FSMContext) -> None:
     """Handle voice/text input after /do command."""
-    await state.clear()  # Clear state immediately
+    await state.clear()
 
     prompt = None
 
@@ -71,13 +70,10 @@ async def handle_do_input(message: Message, bot: Bot, state: FSMContext) -> None
             await message.answer("❌ Не удалось распознать речь")
             return
 
-        # Echo transcription to user
         await message.answer(f"🎤 <i>{prompt}</i>")
 
-    # Handle text input
     elif message.text:
         prompt = message.text
-
     else:
         await message.answer("❌ Отправь текст или голосовое сообщение")
         return
@@ -87,36 +83,24 @@ async def handle_do_input(message: Message, bot: Bot, state: FSMContext) -> None
 
 
 async def process_request(message: Message, prompt: str, user_id: int = 0) -> None:
-    """Process the user's request with Claude."""
+    """Process the user's request with LLM."""
     status_msg = await message.answer("⏳ Выполняю...")
 
     settings = get_settings()
-    processor = ClaudeProcessor(settings.vault_path, settings.todoist_api_key)
+    processor = ClaudeProcessor(
+        settings.vault_path,
+        settings.todoist_api_key,
+        settings.groq_api_key,
+    )
 
-    async def run_with_progress() -> dict:
-        task = asyncio.create_task(
-            asyncio.to_thread(processor.execute_prompt, prompt, user_id)
-        )
-
-        elapsed = 0
-        while not task.done():
-            await asyncio.sleep(30)
-            elapsed += 30
-            if not task.done():
-                try:
-                    await status_msg.edit_text(
-                        f"⏳ Выполняю... ({elapsed // 60}m {elapsed % 60}s)"
-                    )
-                except Exception:
-                    pass
-
-        return await task
-
-    report = await run_with_progress()
+    try:
+        report = await processor.execute_prompt(prompt, user_id)
+    except Exception as e:
+        logger.exception("Execute prompt failed")
+        report = {"error": str(e), "processed_entries": 0}
 
     formatted = format_process_report(report)
     try:
         await status_msg.edit_text(formatted)
     except Exception:
-        # Fallback: send without HTML parsing
         await status_msg.edit_text(formatted, parse_mode=None)

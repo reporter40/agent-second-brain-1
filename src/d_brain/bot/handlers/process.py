@@ -19,37 +19,25 @@ logger = logging.getLogger(__name__)
 
 @router.message(Command("process"))
 async def cmd_process(message: Message) -> None:
-    """Handle /process command - trigger Claude processing."""
+    """Handle /process command - trigger LLM processing."""
     user_id = message.from_user.id if message.from_user else "unknown"
     logger.info("Process command triggered by user %s", user_id)
 
-    status_msg = await message.answer("⏳ Processing... (may take up to 10 min)")
+    status_msg = await message.answer("⏳ Обрабатываю записи...")
 
     settings = get_settings()
-    processor = ClaudeProcessor(settings.vault_path, settings.todoist_api_key)
+    processor = ClaudeProcessor(
+        settings.vault_path,
+        settings.todoist_api_key,
+        settings.groq_api_key,
+    )
     git = VaultGit(settings.vault_path)
 
-    # Run subprocess in thread to avoid blocking event loop
-    async def process_with_progress() -> dict:
-        task = asyncio.create_task(
-            asyncio.to_thread(processor.process_daily, date.today())
-        )
-
-        elapsed = 0
-        while not task.done():
-            await asyncio.sleep(30)
-            elapsed += 30
-            if not task.done():
-                try:
-                    await status_msg.edit_text(
-                        f"⏳ Processing... ({elapsed // 60}m {elapsed % 60}s)"
-                    )
-                except Exception:
-                    pass  # Ignore edit errors
-
-        return await task
-
-    report = await process_with_progress()
+    try:
+        report = await processor.process_daily(date.today())
+    except Exception as e:
+        logger.exception("Process failed")
+        report = {"error": str(e), "processed_entries": 0}
 
     # Commit and push changes
     if "error" not in report:
@@ -61,5 +49,4 @@ async def cmd_process(message: Message) -> None:
     try:
         await status_msg.edit_text(formatted)
     except Exception:
-        # Fallback: send without HTML parsing
         await status_msg.edit_text(formatted, parse_mode=None)

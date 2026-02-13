@@ -13,13 +13,11 @@ ENV PATH="/root/.local/bin:$PATH"
 # Set working directory
 WORKDIR /app
 
-# Copy project files
-COPY pyproject.toml uv.lock ./
-COPY src/ ./src/
-COPY vault/ ./vault/
+# Copy all project files
+COPY . .
 
-# Install dependencies
-RUN uv sync --no-dev
+# Install dependencies (frozen = use existing lock file)
+RUN uv sync --no-dev --frozen
 
 # Run the bot
 CMD ["uv", "run", "python", "-m", "d_brain"]

@@ -31,6 +31,18 @@ class Settings(BaseSettings):
         default=False,
         description="Whether to allow access to all users (security risk!)",
     )
+    vault_git_url: str = Field(
+        default="",
+        description="Git URL for vault synchronization (e.g. https://github.com/user/vault.git)",
+    )
+    vault_git_branch: str = Field(
+        default="main",
+        description="Git branch for vault synchronization",
+    )
+    github_token: str = Field(
+        default="",
+        description="GitHub token for vault authentication",
+    )
 
     @property
     def daily_path(self) -> Path:

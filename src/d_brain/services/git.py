@@ -86,3 +86,70 @@ class VaultGit:
         if self.commit_changes(message):
             return self.push()
         return True  # No changes is not an error
+
+    def ensure_vault(
+        self, 
+        git_url: str, 
+        branch: str = "main", 
+        token: str = "",
+        username: str = "d-brain-bot",
+        email: str = "bot@d-brain.local"
+    ) -> bool:
+        """Ensure vault is cloned and up to date.
+        
+        Args:
+            git_url: Repository URL
+            branch: Branch to use
+            token: GitHub token for authentication
+            username: Git user.name for commits
+            email: Git user.email for commits
+            
+        Returns:
+            True if successful
+        """
+        if not git_url:
+            logger.warning("No git URL provided, skipping vault sync")
+            return False
+
+        # Prepare auth URL if token provided
+        auth_url = git_url
+        if token and "@" not in git_url:
+            # Inject token into URL: https://TOKEN@github.com/...
+            scheme, limit, path = git_url.partition("://")
+            auth_url = f"{scheme}{limit}{token}@{path}"
+
+        # Check if already cloned
+        if not (self.vault_path / ".git").exists():
+            logger.info("Cloning vault from %s...", git_url)
+            # Ensure parent dir exists
+            self.vault_path.mkdir(parents=True, exist_ok=True)
+            
+            # Clone
+            result = subprocess.run(
+                ["git", "clone", "--branch", branch, auth_url, "."],
+                cwd=self.vault_path,
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            if result.returncode != 0:
+                # If directory not empty, try cloning into temp and moving? 
+                # For now just log error.
+                logger.error("Git clone failed: %s", result.stderr)
+                return False
+            logger.info("Vault cloned successfully")
+        else:
+            logger.info("Vault already exists, pulling changes...")
+            # Set remote url with token just in case
+            self._run_git("remote", "set-url", "origin", auth_url)
+            result = self._run_git("pull", "origin", branch)
+            if result.returncode != 0:
+                logger.error("Git pull failed: %s", result.stderr)
+                return False
+            logger.info("Vault updated")
+
+        # Configure local git user
+        self._run_git("config", "user.name", username)
+        self._run_git("config", "user.email", email)
+        
+        return True

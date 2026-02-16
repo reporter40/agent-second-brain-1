@@ -148,15 +148,8 @@ week: {year}-W{week:02d}
 
 {daily_content}"""
 
-        try:
-            output = await self._call_llm(system_prompt, user_prompt)
-            return {"report": output, "processed_entries": 1}
-        except httpx.HTTPStatusError as e:
-            logger.error("Groq API error: %s", e.response.text)
-            return {"error": f"Ошибка API: {e.response.status_code}", "processed_entries": 0}
-        except Exception as e:
-            logger.exception("Unexpected error during processing")
-            return {"error": str(e), "processed_entries": 0}
+        output = await self._call_llm(system_prompt, user_prompt)
+        return {"report": output, "processed_entries": 1}
 
     async def execute_prompt(self, user_prompt: str, user_id: int = 0) -> dict[str, Any]:
         """Execute arbitrary prompt with LLM."""
@@ -179,15 +172,8 @@ week: {year}-W{week:02d}
 - Лимит 4096 символов
 - Пиши на русском языке"""
 
-        try:
-            output = await self._call_llm(system_prompt, user_prompt)
-            return {"report": output, "processed_entries": 1}
-        except httpx.HTTPStatusError as e:
-            logger.error("Groq API error: %s", e.response.text)
-            return {"error": f"Ошибка API: {e.response.status_code}", "processed_entries": 0}
-        except Exception as e:
-            logger.exception("Unexpected error during execution")
-            return {"error": str(e), "processed_entries": 0}
+        output = await self._call_llm(system_prompt, user_prompt)
+        return {"report": output, "processed_entries": 1}
 
     async def generate_weekly(self) -> dict[str, Any]:
         """Generate weekly digest with LLM."""
@@ -229,19 +215,12 @@ week: {year}-W{week:02d}
 
 {all_content}"""
 
+        output = await self._call_llm(system_prompt, user_prompt)
+
+        # Save to summaries/
         try:
-            output = await self._call_llm(system_prompt, user_prompt)
-
-            # Save to summaries/
-            try:
-                self._save_weekly_summary(output, today)
-            except Exception as e:
-                logger.warning("Failed to save weekly summary: %s", e)
-
-            return {"report": output, "processed_entries": 1}
-        except httpx.HTTPStatusError as e:
-            logger.error("Groq API error: %s", e.response.text)
-            return {"error": f"Ошибка API: {e.response.status_code}", "processed_entries": 0}
+            self._save_weekly_summary(output, today)
         except Exception as e:
-            logger.exception("Unexpected error during weekly digest")
-            return {"error": str(e), "processed_entries": 0}
+            logger.warning("Failed to save weekly summary: %s", e)
+
+        return {"report": output, "processed_entries": 1}

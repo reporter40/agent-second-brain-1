@@ -43,12 +43,17 @@ async def cmd_process(message: Message) -> None:
     git = VaultGit(settings.vault_path)
 
     try:
-        report = await processor.process_daily(date.today())
+        report = await handle_rate_limit(
+            processor.process_daily, 
+            date.today(),
+            delay=2.0,
+            max_retries=3
+        )
     except Exception as e:
         logger.exception("Process failed")
         error_str = str(e).lower()
         if "429" in error_str or "rate limit" in error_str:
-            report = {"error": "Превышен лимит запросов. Попробуйте позже.", "processed_entries": 0}
+            report = {"error": "⚠️ Превышен лимит запросов. Попробуйте позже.", "processed_entries": 0}
         else:
             report = {"error": str(e), "processed_entries": 0}
 

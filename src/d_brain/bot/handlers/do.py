@@ -1,6 +1,7 @@
 """Handler for /do command - arbitrary LLM requests."""
 
 import logging
+from datetime import datetime
 
 from aiogram import Bot, Router
 from aiogram.filters import Command, CommandObject
@@ -11,7 +12,9 @@ from d_brain.bot.formatters import format_process_report
 from d_brain.bot.states import DoCommandState
 from d_brain.config import get_settings
 from d_brain.services.processor import ClaudeProcessor
+from d_brain.services.storage import VaultStorage
 from d_brain.services.transcription import DeepgramTranscriber
+from d_brain.utils import handle_rate_limit, RateLimitException
 
 router = Router(name="do")
 logger = logging.getLogger(__name__)
@@ -87,6 +90,16 @@ async def process_request(message: Message, prompt: str, user_id: int = 0) -> No
     status_msg = await message.answer("⏳ Выполняю...")
 
     settings = get_settings()
+    
+    # 1. Save request to Vault first!
+    storage = VaultStorage(settings.vault_path)
+    timestamp = datetime.now()
+    try:
+        storage.append_to_daily(prompt, timestamp, "[request]")
+    except Exception as e:
+        logger.error(f"Failed to save request to vault: {e}")
+        # Continue anyway to try processing
+
     processor = ClaudeProcessor(
         settings.vault_path,
         settings.todoist_api_key,
@@ -94,13 +107,28 @@ async def process_request(message: Message, prompt: str, user_id: int = 0) -> No
     )
 
     try:
-        report = await processor.execute_prompt(prompt, user_id)
+        # 2. Execute with rate limit handling
+        report = await handle_rate_limit(
+            processor.execute_prompt, 
+            prompt, 
+            user_id,
+            delay=2.0,
+            max_retries=3
+        )
     except Exception as e:
         logger.exception("Execute prompt failed")
-        report = {"error": str(e), "processed_entries": 0}
+        error_msg = str(e)
+        if "rate limit" in error_msg.lower() or "429" in error_msg.lower():
+            report = {"error": "⚠️ Слишком много запросов. Запрос сохранен, но не обработан.", "processed_entries": 0}
+        else:
+            report = {"error": str(e), "processed_entries": 0}
 
     formatted = format_process_report(report)
     try:
         await status_msg.edit_text(formatted)
     except Exception:
-        await status_msg.edit_text(formatted, parse_mode=None)
+        # If edit fails (e.g. rate limit), try sending new message
+        try:
+            await message.answer(formatted)
+        except:
+            pass

@@ -67,7 +67,12 @@ async def handle_voice(message: Message, bot: Bot) -> None:
         )
 
         try:
-            await message.answer(f"🎤 {transcript}\n\n✓ Сохранено")
+            await handle_rate_limit(
+                message.answer, 
+                f"🎤 {transcript}\n\n✓ Сохранено",
+                delay=2.0,
+                max_retries=3
+            )
         except Exception as e:
             if "429" in str(e).lower() or "rate limit" in str(e).lower():
                 logger.warning("Rate limit hit when sending voice response")

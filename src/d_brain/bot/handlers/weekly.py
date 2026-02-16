@@ -11,6 +11,7 @@ from d_brain.bot.formatters import format_process_report
 from d_brain.config import get_settings
 from d_brain.services.git import VaultGit
 from d_brain.services.processor import ClaudeProcessor
+from d_brain.utils import handle_rate_limit
 
 router = Router(name="weekly")
 logger = logging.getLogger(__name__)
@@ -33,10 +34,18 @@ async def cmd_weekly(message: Message) -> None:
     git = VaultGit(settings.vault_path)
 
     try:
-        report = await processor.generate_weekly()
+        report = await handle_rate_limit(
+            processor.generate_weekly,
+            delay=2.0,
+            max_retries=3
+        )
     except Exception as e:
         logger.exception("Weekly digest failed")
-        report = {"error": str(e), "processed_entries": 0}
+        error_msg = str(e).lower()
+        if "429" in error_msg or "rate limit" in error_msg:
+            report = {"error": "⚠️ Слишком много запросов. Попробуйте создать отчет чуть позже.", "processed_entries": 0}
+        else:
+            report = {"error": str(e), "processed_entries": 0}
 
     # Commit any changes
     if "error" not in report:

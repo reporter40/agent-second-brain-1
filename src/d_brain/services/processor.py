@@ -27,6 +27,9 @@ class ClaudeProcessor:
         self.vault_path = Path(vault_path)
         self.todoist_api_key = todoist_api_key
         self.groq_api_key = groq_api_key
+        # We initialize storage internally to ensure consistent path logic
+        from d_brain.services.storage import VaultStorage
+        self.storage = VaultStorage(self.vault_path)
 
     async def _call_llm(self, system_prompt: str, user_prompt: str) -> str:
         """Call Groq API for chat completion.
@@ -57,10 +60,16 @@ class ClaudeProcessor:
         }
 
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            response = await client.post(GROQ_API_URL, json=payload, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
+            try:
+                response = await client.post(GROQ_API_URL, json=payload, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                return data["choices"][0]["message"]["content"]
+            except httpx.HTTPStatusError as e:
+                # Re-raise with specific message for 429 to be caught by handle_rate_limit
+                if e.response.status_code == 429:
+                    raise  # Will be caught by handle_rate_limit mechanism
+                raise
 
     def _get_session_context(self, user_id: int) -> str:
         """Get today's session context."""
@@ -120,13 +129,15 @@ week: {year}-W{week:02d}
         if day is None:
             day = date.today()
 
-        daily_file = self.vault_path / "daily" / f"{day.isoformat()}.md"
+        # Use Storage service to read file - ensures consistency with /status
+        daily_content = self.storage.read_daily(day)
 
-        if not daily_file.exists():
-            logger.warning("No daily file for %s", day)
+        if not daily_content:
+            logger.warning("No daily content found for %s via Storage", day)
+            # Try debugging: does the file exist on disk?
+            fpath = self.storage.get_daily_file(day)
+            logger.info("Checked path: %s (exists=%s)", fpath.absolute(), fpath.exists())
             return {"error": f"Нет записей за {day}", "processed_entries": 0}
-
-        daily_content = daily_file.read_text()
 
         system_prompt = """Ты — персональный ассистент d-brain. Твоя задача — обработать дневные записи пользователя.
 
@@ -180,14 +191,13 @@ week: {year}-W{week:02d}
         today = date.today()
 
         # Collect daily files for the last 7 days
-        daily_dir = self.vault_path / "daily"
         week_content = []
         for i in range(7):
             from datetime import timedelta
             day = today - timedelta(days=i)
-            daily_file = daily_dir / f"{day.isoformat()}.md"
-            if daily_file.exists():
-                content = daily_file.read_text()
+            # Use Storage service
+            content = self.storage.read_daily(day)
+            if content:
                 week_content.append(f"--- {day} ---\n{content}")
 
         if not week_content:

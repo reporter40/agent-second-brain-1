@@ -10,6 +10,7 @@ from d_brain.config import get_settings
 from d_brain.services.session import SessionStore
 from d_brain.services.storage import VaultStorage
 from d_brain.services.transcription import DeepgramTranscriber
+from d_brain.utils import handle_rate_limit, RateLimitException
 
 router = Router(name="voice")
 logger = logging.getLogger(__name__)
@@ -39,7 +40,14 @@ async def handle_voice(message: Message, bot: Bot) -> None:
             return
 
         audio_bytes = file_bytes.read()
-        transcript = await transcriber.transcribe(audio_bytes)
+        
+        # Handle potential rate limiting when transcribing
+        try:
+            transcript = await handle_rate_limit(transcriber.transcribe, audio_bytes)
+        except RateLimitException as e:
+            logger.error(f"Rate limit exceeded during transcription: {e}")
+            await message.answer("⚠️ Слишком много запросов. Попробуйте немного позже.")
+            return
 
         if not transcript:
             await message.answer("Could not transcribe audio")
@@ -58,9 +66,22 @@ async def handle_voice(message: Message, bot: Bot) -> None:
             msg_id=message.message_id,
         )
 
-        await message.answer(f"🎤 {transcript}\n\n✓ Сохранено")
+        try:
+            await message.answer(f"🎤 {transcript}\n\n✓ Сохранено")
+        except Exception as e:
+            if "429" in str(e).lower() or "rate limit" in str(e).lower():
+                logger.warning("Rate limit hit when sending voice response")
+            else:
+                logger.error(f"Error sending response: {e}")
+                
         logger.info("Voice message saved: %d chars", len(transcript))
 
     except Exception as e:
         logger.exception("Error processing voice message")
-        await message.answer(f"Error: {e}")
+        try:
+            await message.answer(f"Error: {e}")
+        except Exception as response_error:
+            if "429" in str(response_error).lower() or "rate limit" in str(response_error).lower():
+                logger.warning("Rate limit hit when sending error response")
+            else:
+                logger.error(f"Error sending error response: {response_error}")

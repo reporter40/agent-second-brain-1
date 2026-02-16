@@ -12,6 +12,7 @@ from d_brain.bot.formatters import format_process_report
 from d_brain.config import get_settings
 from d_brain.services.git import VaultGit
 from d_brain.services.processor import ClaudeProcessor
+from d_brain.utils import handle_rate_limit, RateLimitException
 
 router = Router(name="process")
 logger = logging.getLogger(__name__)
@@ -23,7 +24,15 @@ async def cmd_process(message: Message) -> None:
     user_id = message.from_user.id if message.from_user else "unknown"
     logger.info("Process command triggered by user %s", user_id)
 
-    status_msg = await message.answer("⏳ Обрабатываю записи...")
+    try:
+        status_msg = await message.answer("⏳ Обрабатываю записи...")
+    except Exception as e:
+        logger.exception("Error sending initial processing message")
+        if "429" in str(e).lower() or "rate limit" in str(e).lower():
+            await message.answer("⚠️ Слишком много запросов. Попробуйте чуть позже.")
+            return
+        else:
+            raise
 
     settings = get_settings()
     processor = ClaudeProcessor(
@@ -37,7 +46,11 @@ async def cmd_process(message: Message) -> None:
         report = await processor.process_daily(date.today())
     except Exception as e:
         logger.exception("Process failed")
-        report = {"error": str(e), "processed_entries": 0}
+        error_str = str(e).lower()
+        if "429" in error_str or "rate limit" in error_str:
+            report = {"error": "Превышен лимит запросов. Попробуйте позже.", "processed_entries": 0}
+        else:
+            report = {"error": str(e), "processed_entries": 0}
 
     # Commit and push changes
     if "error" not in report:
@@ -48,5 +61,13 @@ async def cmd_process(message: Message) -> None:
     formatted = format_process_report(report)
     try:
         await status_msg.edit_text(formatted)
-    except Exception:
-        await status_msg.edit_text(formatted, parse_mode=None)
+    except Exception as e:
+        if "429" in str(e).lower() or "rate limit" in str(e).lower():
+            # If can't edit due to rate limit, send new message
+            try:
+                await asyncio.sleep(1)
+                await message.answer(formatted)
+            except:
+                await message.answer("Обработка завершена, но не удалось обновить сообщение.")
+        else:
+            await status_msg.edit_text(formatted, parse_mode=None)

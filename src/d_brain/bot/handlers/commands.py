@@ -1,5 +1,7 @@
 """Command handlers for /start, /help, /status."""
 
+import asyncio
+import logging
 from datetime import date
 
 from aiogram import Router
@@ -10,29 +12,54 @@ from d_brain.bot.keyboards import get_main_keyboard
 from d_brain.config import get_settings
 from d_brain.services.session import SessionStore
 from d_brain.services.storage import VaultStorage
+from d_brain.utils import handle_rate_limit, RateLimitException
 
 router = Router(name="commands")
+logger = logging.getLogger(__name__)
 
 
 @router.message(Command("start"))
 async def cmd_start(message: Message) -> None:
     """Handle /start command."""
-    await message.answer(
-        "<b>d-brain</b> - твой голосовой дневник\n\n"
-        "Отправляй мне:\n"
-        "🎤 Голосовые сообщения\n"
-        "💬 Текст\n"
-        "📷 Фото\n"
-        "↩️ Пересланные сообщения\n\n"
-        "Всё будет сохранено и обработано.\n\n"
-        "<b>Команды:</b>\n"
-        "/status - статус сегодняшнего дня\n"
-        "/process - обработать записи\n"
-        "/do - выполнить произвольный запрос\n"
-        "/weekly - недельный дайджест\n"
-        "/help - справка",
-        reply_markup=get_main_keyboard(),
-    )
+    try:
+        await message.answer(
+            "<b>d-brain</b> - твой голосовой дневник\n\n"
+            "Отправляй мне:\n"
+            "🎤 Голосовые сообщения\n"
+            "💬 Текст\n"
+            "📷 Фото\n"
+            "↩️ Пересланные сообщения\n\n"
+            "Всё будет сохранено и обработано.\n\n"
+            "<b>Команды:</b>\n"
+            "/status - статус сегодняшнего дня\n"
+            "/process - обработать записи\n"
+            "/do - выполнить произвольный запрос\n"
+            "/weekly - недельный дайджест\n"
+            "/help - справка",
+            reply_markup=get_main_keyboard(),
+        )
+    except Exception as e:
+        logger.exception("Error in /start command")
+        if "429" in str(e).lower() or "rate limit" in str(e).lower():
+            # If rate limit, try to send without keyboard
+            await asyncio.sleep(1)
+            await message.answer(
+                "<b>d-brain</b> - твой голосовой дневник\n\n"
+                "Отправляй мне:\n"
+                "🎤 Голосовые сообщения\n"
+                "💬 Текст\n"
+                "📷 Фото\n"
+                "↩️ Пересланные сообщения\n\n"
+                "Всё будет сохранено и обработано.\n\n"
+                "<b>Команды:</b>\n"
+                "/status - статус сегодняшнего дня\n"
+                "/process - обработать записи\n"
+                "/do - выполнить произвольный запрос\n"
+                "/weekly - недельный дайджест\n"
+                "/help - справка"
+            )
+        else:
+            raise
 
 
 @router.message(Command("help"))
